@@ -1,0 +1,50 @@
+type User {
+  userId: ID!
+  email: String!
+  name: String!
+  provider: String
+}
+
+type OrderItem {
+  productId: ID!
+  quantity: Int!
+  unitPrice: Float!
+}
+
+type Order {
+  orderId: ID!
+  userId: ID!
+  status: String!
+  items: [OrderItem!]!
+  total: Float!
+  createdAt: String!
+}
+
+type StockStatus {
+  available: Boolean!
+  stockLevel: Int!
+}
+
+type Query {
+  me: User
+  order(orderId: ID!): Order
+  checkStock(productId: ID!, quantity: Int!): StockStatus
+}
+
+type Mutation {
+  register(email: String!, password: String!, name: String!): AuthPayload!
+  login(email: String!, password: String!): AuthPayload!
+  createOrder(items: [OrderItemInput!]!): Order!
+  cancelOrder(orderId: ID!): Boolean!
+}
+
+type AuthPayload {
+  token: String!
+  userId: ID!
+}
+
+input OrderItemInput {
+  productId: ID!
+  quantity: Int!
+  unitPrice: Float!
+}

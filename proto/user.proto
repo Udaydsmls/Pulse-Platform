@@ -1,0 +1,53 @@
+syntax = "proto3";
+package user.v1;
+option go_package = "github.com/pulse-platform/user-service/gen/pb;pb";
+
+service UserService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Login(LoginRequest) returns (LoginResponse);
+  rpc GetUser(GetUserRequest) returns (GetUserResponse);
+  rpc OAuthLogin(OAuthLoginRequest) returns (OAuthLoginResponse);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+}
+
+message RegisterResponse {
+  string user_id = 1;
+  string token = 2;
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string token = 1;
+  string user_id = 2;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message GetUserResponse {
+  string user_id = 1;
+  string email = 2;
+  string name = 3;
+  string created_at = 4;
+  string provider = 5;
+}
+
+message OAuthLoginRequest {
+  string code = 1;
+  string provider = 2;
+}
+
+message OAuthLoginResponse {
+  string token = 1;
+  string user_id = 2;
+}

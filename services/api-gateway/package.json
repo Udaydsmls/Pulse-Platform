@@ -1,0 +1,54 @@
+{
+  "name": "@pulse-platform/api-gateway",
+  "version": "1.0.0",
+  "description": "API Gateway for Pulse Platform — single internet-facing entry point",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "build": "tsc && npm run copy-schema",
+    "copy-schema": "node -e \"const fs=require('fs');const path=require('path');fs.mkdirSync('dist/graphql',{recursive:true});fs.copyFileSync('graphql/schema.graphql','dist/graphql/schema.graphql')\"",
+    "start": "node dist/index.js",
+    "lint": "eslint 'src/**/*.ts' 'graphql/**/*.ts'",
+    "test": "jest --forceExit --detectOpenHandles"
+  },
+  "dependencies": {
+    "@apollo/server": "^4.11.0",
+    "@as-integrations/express": "^2.0.1",
+    "@elastic/elasticsearch": "^8.15.0",
+    "@grpc/grpc-js": "^1.11.1",
+    "@grpc/proto-loader": "^0.7.13",
+    "@opentelemetry/auto-instrumentations-node": "^0.50.0",
+    "@opentelemetry/sdk-node": "^0.53.0",
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.1",
+    "graphql": "^16.9.0",
+    "helmet": "^8.0.0",
+    "ioredis": "^5.4.1",
+    "jsonwebtoken": "^9.0.2",
+    "kafkajs": "^2.2.4",
+    "pino": "^9.4.0",
+    "pino-pretty": "^11.3.0",
+    "ws": "^8.18.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jest": "^29.5.13",
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^20.16.11",
+    "@types/ws": "^8.5.12",
+    "@typescript-eslint/eslint-plugin": "^8.8.1",
+    "@typescript-eslint/parser": "^8.8.1",
+    "eslint": "^9.12.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

@@ -1,0 +1,63 @@
+# ─── Go ───────────────────────────────────────────────────────────────────────
+bin/
+vendor/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+coverage.out
+coverage.html
+*.test
+*.prof
+
+# ─── Node / TypeScript ────────────────────────────────────────────────────────
+node_modules/
+dist/
+.env
+*.env.local
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnp
+.pnp.js
+
+# ─── Terraform ───────────────────────────────────────────────────────────────
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfstate.*.backup
+.terraform.lock.hcl
+terraform.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# ─── AWS CDK ─────────────────────────────────────────────────────────────────
+cdk.out/
+cdk.context.json
+
+# ─── General ─────────────────────────────────────────────────────────────────
+*.log
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+Thumbs.db
+
+# ─── Docker local overrides ───────────────────────────────────────────────────
+.env.local
+docker-compose.override.yml
+
+# ─── k6 load test results ─────────────────────────────────────────────────────
+load_tests/results/
+
+# ─── Helm chart archives ──────────────────────────────────────────────────────
+charts/*.tgz
+
+# ─── DO NOT IGNORE: keep generated protobuf stubs ────────────────────────────
+# gen/pb/ directories are intentionally committed
+!**/gen/pb/

@@ -1,0 +1,23 @@
+replicaCount: 3
+
+image:
+  repository: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/pulse-platform/inventory-service
+  tag: "latest"
+  pullPolicy: Always
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+env:
+  GRPC_PORT: "50052"
+  DATABASE_URL: "postgresql://pulseadmin:$(DB_PASSWORD)@$(DB_HOST):5432/pulsedb?sslmode=require"
+  KAFKA_BROKERS: "$(KAFKA_BOOTSTRAP_SERVERS)"
+  LOG_LEVEL: "info"
+  ENVIRONMENT: "prod"
+
+envFrom:
+  - secretRef:
+      name: inventory-service-secrets

@@ -1,0 +1,25 @@
+replicaCount: 3
+
+image:
+  repository: ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/pulse-platform/notification-service
+  tag: "latest"
+  pullPolicy: Always
+
+service:
+  enabled: false
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+env:
+  KAFKA_BROKERS: "$(KAFKA_BOOTSTRAP_SERVERS)"
+  DATABASE_URL: "postgresql://pulseadmin:$(DB_PASSWORD)@$(DB_HOST):5432/pulsedb?sslmode=require"
+  LOG_LEVEL: "info"
+  ENVIRONMENT: "prod"
+
+envFrom:
+  - secretRef:
+      name: notification-service-secrets

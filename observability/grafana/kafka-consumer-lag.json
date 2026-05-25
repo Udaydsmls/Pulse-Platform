@@ -1,0 +1,136 @@
+{
+  "uid": "pulse-kafka-consumer-lag",
+  "title": "Kafka Consumer Lag",
+  "description": "Kafka consumer group lag metrics for pulse-platform topics",
+  "tags": ["pulse-platform", "kafka", "consumer"],
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "30s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "templating": {
+    "list": [
+      {
+        "name": "topic",
+        "type": "query",
+        "label": "Topic",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(kafka_consumergroup_lag, topic)",
+        "multi": true,
+        "includeAll": true,
+        "current": {}
+      },
+      {
+        "name": "consumergroup",
+        "type": "query",
+        "label": "Consumer Group",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(kafka_consumergroup_lag, consumergroup)",
+        "multi": true,
+        "includeAll": true,
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Consumer Lag per Topic",
+      "description": "Current consumer group lag by topic and consumer group",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic, consumergroup) (kafka_consumergroup_lag{topic=~\"$topic\", consumergroup=~\"$consumergroup\"})",
+          "legendFormat": "{{consumergroup}} / {{topic}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "color": { "mode": "palette-classic" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max", "last"] }
+      }
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Consumer Group Offset Rate",
+      "description": "Rate of offset commits per consumer group — a measure of consumption throughput",
+      "gridPos": { "x": 0, "y": 10, "w": 24, "h": 10 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (topic, consumergroup) (rate(kafka_consumergroup_current_offset{topic=~\"$topic\", consumergroup=~\"$consumergroup\"}[5m]))",
+          "legendFormat": "{{consumergroup}} / {{topic}} offset rate"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "color": { "mode": "palette-classic" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "tooltip": { "mode": "multi", "sort": "desc" },
+        "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["mean", "max"] }
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Max Lag by Topic (Current)",
+      "description": "Current maximum consumer lag across all groups, per topic",
+      "gridPos": { "x": 0, "y": 20, "w": 12, "h": 6 },
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "max by (topic) (kafka_consumergroup_lag)",
+          "legendFormat": "{{topic}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 1000 },
+              { "color": "red", "value": 10000 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"] },
+        "orientation": "horizontal",
+        "colorMode": "background",
+        "textMode": "auto"
+      }
+    }
+  ]
+}
