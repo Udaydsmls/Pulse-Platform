@@ -1,124 +1,96 @@
 import http from "k6/http";
 import { check, sleep } from "k6";
 
+// Load test for the api-gateway. Run with:
+//   k6 run load_tests/api_load_test.js
+//   BASE_URL=https://api.pulse-platform.example.com k6 run load_tests/api_load_test.js
+//
+// Run ./scripts/seed_data.sh first so the products below have stock. Note that
+// what is measured here is gateway latency: POST /orders returns as soon as
+// order.created is published, and the rest of the saga runs asynchronously.
+
 const BASE_URL = __ENV.BASE_URL || "http://localhost:3000";
+
+const USER = {
+  name: "Load Test User",
+  email: "loadtest@pulse-platform.dev",
+  password: "LoadTest@123456",
+};
+
+// Product IDs from the gateway's catalogue, kept cheap so the mock payment
+// gateway approves them and stock lasts the run.
+const PRODUCTS = ["p1", "p2", "p3"];
 
 export const options = {
   stages: [
-    { duration: "1m", target: 100 },  // Ramp up to 100 VUs over 1 minute
-    { duration: "3m", target: 500 },  // Hold at 500 VUs for 3 minutes
-    { duration: "1m", target: 0 },    // Ramp down to 0 over 1 minute
+    { duration: "1m", target: 100 },
+    { duration: "3m", target: 500 },
+    { duration: "1m", target: 0 },
   ],
   thresholds: {
-    http_req_duration: ["p(95)<200"],  // 95th percentile latency < 200ms
-    http_req_failed: ["rate<0.01"],    // Error rate < 1%
+    "http_req_duration": ["p(95)<200"],
+    "http_req_failed": ["rate<0.01"],
   },
 };
 
-// ── Setup: register and login a test user, return auth token ─────────────────
+const jsonHeaders = { "Content-Type": "application/json" };
+
 export function setup() {
-  const registerPayload = JSON.stringify({
-    name: "Load Test User",
-    email: "loadtest@pulse-platform.dev",
-    password: "LoadTest@123456",
-  });
+  // Already-registered is fine — the login below is what matters.
+  http.post(`${BASE_URL}/auth/register`, JSON.stringify(USER), { headers: jsonHeaders });
 
-  const headers = { "Content-Type": "application/json" };
-
-  // Register (ignore 409 if user already exists)
-  http.post(`${BASE_URL}/auth/register`, registerPayload, { headers });
-
-  // Login
-  const loginRes = http.post(
+  const res = http.post(
     `${BASE_URL}/auth/login`,
-    JSON.stringify({
-      email: "loadtest@pulse-platform.dev",
-      password: "LoadTest@123456",
-    }),
-    { headers }
+    JSON.stringify({ email: USER.email, password: USER.password }),
+    { headers: jsonHeaders },
   );
 
-  check(loginRes, {
-    "setup: login succeeded": (r) => r.status === 200,
-  });
-
-  const body = loginRes.json();
-  const token = body.token || body.access_token;
-  if (!token) {
-    throw new Error(`setup: could not extract auth token. Response: ${loginRes.body}`);
+  if (res.status !== 200) {
+    throw new Error(`setup: login failed with ${res.status}: ${res.body}`);
   }
-
-  return { token };
+  return { token: res.json("token") };
 }
 
-// ── Default function: mixed read/write workload ──────────────────────────────
 export default function (data) {
-  const { token } = data;
-  const authHeaders = {
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${token}`,
+  const headers = {
+    ...jsonHeaders,
+    Authorization: `Bearer ${data.token}`,
   };
 
-  // Weighted random: 0.0–0.29 → GET /products, 0.30–0.69 → POST /orders, 0.70–0.99 → GET /orders/:id
-  const rand = Math.random();
-
-  if (rand < 0.30) {
-    // ── 30%: Browse products ───────────────────────────────────────────────
-    const res = http.get(`${BASE_URL}/products`, { headers: authHeaders });
-    check(res, {
-      "GET /products status 200": (r) => r.status === 200,
-    });
-
-  } else if (rand < 0.70) {
-    // ── 40%: Create an order ───────────────────────────────────────────────
-    const productIds = ["prod-001", "prod-002", "prod-003", "prod-004", "prod-005"];
-    const randomProduct = productIds[Math.floor(Math.random() * productIds.length)];
-    const quantity = Math.floor(Math.random() * 3) + 1;
-
-    const orderPayload = JSON.stringify({
-      items: [
-        {
-          productId: randomProduct,
-          quantity,
-          unitPrice: parseFloat((Math.random() * 100 + 5).toFixed(2)),
-        },
-      ],
-      shippingAddress: {
-        street: "123 Load Test Ave",
-        city: "Boston",
-        state: "MA",
-        zip: "02101",
-        country: "US",
-      },
-    });
-
-    const res = http.post(`${BASE_URL}/orders`, orderPayload, { headers: authHeaders });
-    const created = check(res, {
-      "POST /orders status 201": (r) => r.status === 201,
-    });
-
-    // Store created order ID for potential follow-up reads
-    if (created) {
-      const body = res.json();
-      if (body && body.id) {
-        // Immediately fetch the created order (simulates order confirmation page)
-        const getRes = http.get(`${BASE_URL}/orders/${body.id}`, { headers: authHeaders });
-        check(getRes, {
-          "GET /orders/:id (post-create) status 200": (r) => r.status === 200,
-        });
-      }
-    }
-
+  // Roughly 70% reads, 30% writes — a browsing-heavy shopping pattern.
+  if (Math.random() < 0.7) {
+    browseProducts(headers);
   } else {
-    // ── 30%: Fetch a specific order (uses a known test order or a random ID) ─
-    // In a real scenario you'd share order IDs from the setup phase. Here we
-    // use a stable order ID seeded in the dev environment.
-    const orderId = `order-${Math.floor(Math.random() * 100) + 1}`;
-    const res = http.get(`${BASE_URL}/orders/${orderId}`, { headers: authHeaders });
-    check(res, {
-      "GET /orders/:id status 200 or 404": (r) => r.status === 200 || r.status === 404,
-    });
+    placeAndReadOrder(headers);
   }
 
   sleep(0.5);
+}
+
+function browseProducts(headers) {
+  const res = http.get(`${BASE_URL}/products`, { headers });
+  check(res, { "GET /products is 200": (r) => r.status === 200 });
+}
+
+function placeAndReadOrder(headers) {
+  const body = JSON.stringify({
+    items: [
+      {
+        productId: PRODUCTS[Math.floor(Math.random() * PRODUCTS.length)],
+        quantity: 1,
+        unitPrice: 29.99,
+      },
+    ],
+  });
+
+  const res = http.post(`${BASE_URL}/orders`, body, { headers });
+  const created = check(res, { "POST /orders is 201": (r) => r.status === 201 });
+  if (!created) {
+    return;
+  }
+
+  // Read the order straight back, the way a confirmation page would.
+  const orderId = res.json("orderId");
+  const readRes = http.get(`${BASE_URL}/orders/${orderId}`, { headers });
+  check(readRes, { "GET /orders/:id is 200": (r) => r.status === 200 });
 }

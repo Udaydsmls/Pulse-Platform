@@ -11,8 +11,8 @@ spec:
   selector:
     {{- include "payment-service.selectorLabels" . | nindent 4 }}
   ports:
-    - name: grpc
-      port: {{ .Values.service.port }}
-      targetPort: grpc
+    - name: metrics
+      port: 9090
+      targetPort: metrics
       protocol: TCP
 {{- end }}

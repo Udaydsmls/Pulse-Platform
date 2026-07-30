@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
+# Creates the Kafka topics the services publish to.
 set -euo pipefail
 
-KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:9092}"
-PARTITIONS=3
-REPLICATION_FACTOR=1
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE="docker compose -f ${PROJECT_ROOT}/docker-compose.dev.yml"
 
 TOPICS=(
   "user.events"
@@ -13,26 +13,22 @@ TOPICS=(
   "notification.events"
 )
 
-echo "Using Kafka bootstrap servers: ${KAFKA_BOOTSTRAP_SERVERS}"
-
-# Retrieve existing topics once
-existing_topics=$(kafka-topics.sh --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list 2>/dev/null || true)
-
+# Auto-creation is off in docker-compose.dev.yml, so topics are created here with
+# a known partition count. Events are keyed by order ID, which keeps all events
+# for one order on the same partition and therefore in order.
+#
+# kafka-topics ships inside the broker image, so it runs there rather than
+# needing a Kafka install on the host.
 for topic in "${TOPICS[@]}"; do
-  if echo "${existing_topics}" | grep -qx "${topic}"; then
-    echo "[SKIP]   Topic '${topic}' already exists."
-  else
-    echo "[CREATE] Creating topic '${topic}' (partitions=${PARTITIONS}, replication-factor=${REPLICATION_FACTOR})..."
-    kafka-topics.sh \
-      --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" \
-      --create \
-      --topic "${topic}" \
-      --partitions "${PARTITIONS}" \
-      --replication-factor "${REPLICATION_FACTOR}"
-    echo "[OK]     Topic '${topic}' created."
-  fi
+  echo "creating topic ${topic}"
+  $COMPOSE exec -T kafka kafka-topics \
+    --bootstrap-server localhost:9092 \
+    --create --if-not-exists \
+    --topic "${topic}" \
+    --partitions 3 \
+    --replication-factor 1
 done
 
 echo ""
-echo "All Kafka topics are ready."
-kafka-topics.sh --bootstrap-server "${KAFKA_BOOTSTRAP_SERVERS}" --list
+echo "topics now on the broker:"
+$COMPOSE exec -T kafka kafka-topics --bootstrap-server localhost:9092 --list

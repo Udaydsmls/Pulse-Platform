@@ -1,11 +1,10 @@
-// OTel must be initialized before any other imports that instrument libraries.
+// OTel has to be set up before anything it instruments is imported, so this
+// block stays at the very top of the file.
 import { NodeSDK } from '@opentelemetry/sdk-node';
 import { getNodeAutoInstrumentations } from '@opentelemetry/auto-instrumentations-node';
 
-const otelSdk = new NodeSDK({
-  instrumentations: [getNodeAutoInstrumentations()],
-});
-otelSdk.start();
+const otel = new NodeSDK({ instrumentations: [getNodeAutoInstrumentations()] });
+otel.start();
 
 import http from 'http';
 import express from 'express';
@@ -13,102 +12,81 @@ import helmet from 'helmet';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { Kafka } from 'kafkajs';
-import pino from 'pino';
+import { ZodError } from 'zod';
 
-import { loadConfig } from './config';
-import { redisClient, subscriber, publishOrderUpdate } from './redis/client';
-import { authRouter } from './routes/auth';
-import { ordersRouter } from './routes/orders';
-import { productsRouter, searchRouter } from './routes/products';
-import { setupWebSocket } from './websocket/handler';
-import { setupGraphQL } from '../graphql/resolvers/index';
-import { optionalJWT } from './middleware/auth';
-
-const logger = pino({
-  name: 'api-gateway',
-  transport:
-    process.env['NODE_ENV'] !== 'production'
-      ? { target: 'pino-pretty', options: { colorize: true } }
-      : undefined,
-});
+import { config } from './config';
+import { redis, publisher, publishOrderUpdate } from './redis';
+import { optionalAuth } from './auth';
+import { authRouter, ordersRouter, productsRouter } from './routes';
+import { setupGraphQL } from './graphql';
+import { setupWebSocket } from './websocket';
 
 async function main(): Promise<void> {
-  const config = loadConfig();
-
-  // ── Express app ────────────────────────────────────────────────────────────
-
   const app = express();
 
   app.use(helmet());
-  app.use(
-    cors({
-      origin: config.CORS_ORIGINS,
-      credentials: true,
-    }),
-  );
+  app.use(cors({ origin: config.corsOrigins, credentials: true }));
   app.use(express.json({ limit: '1mb' }));
-  app.use(
-    rateLimit({
-      windowMs: 60_000,
-      max: 200,
-      standardHeaders: true,
-      legacyHeaders: false,
-      message: { error: 'Too Many Requests' },
-    }),
-  );
+  app.use(rateLimit({ windowMs: 60_000, max: 200 }));
 
-  app.use(optionalJWT);
+  // Runs before the routers so both REST and GraphQL see req.user.
+  app.use(optionalAuth);
 
-  // ── Routes ─────────────────────────────────────────────────────────────────
+  app.get('/health', (_req, res) => res.json({ status: 'ok' }));
 
   app.use('/auth', authRouter);
   app.use('/orders', ordersRouter);
   app.use('/products', productsRouter);
-  app.use('/search', searchRouter);
-
-  // ── GraphQL ────────────────────────────────────────────────────────────────
 
   await setupGraphQL(app);
 
-  // ── Health check ───────────────────────────────────────────────────────────
-
-  app.get('/health', (_req, res) => {
-    res.json({ status: 'ok' });
+  // Bad input is the client's fault; everything else is ours and is logged
+  // rather than returned, so internal errors don't leak to callers.
+  app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    if (err instanceof ZodError) {
+      res.status(400).json({ error: 'Invalid request', details: err.issues });
+      return;
+    }
+    console.error('Unhandled error:', err);
+    res.status(500).json({ error: 'Internal Server Error' });
   });
-
-  // ── Global error handler ───────────────────────────────────────────────────
-
-  app.use(
-    (
-      err: Error,
-      _req: express.Request,
-      res: express.Response,
-      _next: express.NextFunction,
-    ) => {
-      logger.error({ err }, 'Unhandled error');
-      res.status(500).json({ error: 'Internal Server Error' });
-    },
-  );
-
-  // ── HTTP + WebSocket server ────────────────────────────────────────────────
 
   const server = http.createServer(app);
   setupWebSocket(server);
 
-  // ── Redis ──────────────────────────────────────────────────────────────────
+  await redis.connect();
+  await publisher.connect();
 
-  await redisClient.connect();
-  await subscriber.connect();
-  logger.info('Redis connected');
+  const consumer = await startOrderUpdateRelay();
 
-  // ── Kafka consumer (notification.events → Redis pub/sub) ──────────────────
-
-  const kafka = new Kafka({
-    clientId: 'api-gateway',
-    brokers: config.KAFKA_BROKERS,
+  server.listen(config.port, () => {
+    console.log(`api-gateway listening on :${config.port}`);
   });
 
+  const shutdown = async (): Promise<void> => {
+    console.log('shutting down');
+    await consumer.disconnect();
+    await redis.quit();
+    await publisher.quit();
+    server.close(() => {
+      void otel.shutdown().finally(() => process.exit(0));
+    });
+    // Don't wait forever for in-flight connections to drain.
+    setTimeout(() => process.exit(1), 10_000).unref();
+  };
+
+  process.on('SIGTERM', () => void shutdown());
+  process.on('SIGINT', () => void shutdown());
+}
+
+/**
+ * Bridges Kafka to Redis pub/sub: notification-service publishes an update, and
+ * we hand it to whichever gateway replica holds that user's WebSocket.
+ */
+async function startOrderUpdateRelay() {
+  const kafka = new Kafka({ clientId: 'api-gateway', brokers: config.kafkaBrokers });
   const consumer = kafka.consumer({ groupId: 'api-gateway-ws-relay' });
+
   await consumer.connect();
   await consumer.subscribe({ topic: 'notification.events', fromBeginning: false });
 
@@ -117,52 +95,21 @@ async function main(): Promise<void> {
       if (!message.value) return;
 
       try {
-        const event = JSON.parse(message.value.toString()) as {
-          userId?: string;
-          user_id?: string;
-          [key: string]: unknown;
-        };
-        const userId = event.userId ?? event.user_id;
-
-        if (userId) {
-          await publishOrderUpdate(userId, event);
+        const event = JSON.parse(message.value.toString()) as { user_id?: string };
+        if (event.user_id) {
+          await publishOrderUpdate(event.user_id, event);
         }
       } catch (err) {
-        logger.warn({ err }, 'Failed to parse Kafka message');
+        console.warn('Skipping malformed notification event:', err);
       }
     },
   });
 
-  logger.info({ topic: 'notification.events' }, 'Kafka consumer running');
-
-  // ── Start listening ────────────────────────────────────────────────────────
-
-  server.listen(config.PORT, () => {
-    logger.info({ port: config.PORT }, 'API Gateway listening');
-  });
-
-  // ── Graceful shutdown ──────────────────────────────────────────────────────
-
-  const shutdown = async (signal: string): Promise<void> => {
-    logger.info({ signal }, 'Shutting down');
-
-    await consumer.disconnect();
-    await redisClient.quit();
-    await subscriber.quit();
-
-    server.close(() => {
-      logger.info('HTTP server closed');
-      otelSdk.shutdown().finally(() => process.exit(0));
-    });
-
-    setTimeout(() => process.exit(1), 10_000).unref();
-  };
-
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGINT', () => void shutdown('SIGINT'));
+  console.log('relaying notification.events to Redis pub/sub');
+  return consumer;
 }
 
 main().catch((err) => {
-  logger.error({ err }, 'Fatal startup error');
+  console.error('Fatal startup error:', err);
   process.exit(1);
 });

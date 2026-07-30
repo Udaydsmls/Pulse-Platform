@@ -16,9 +16,10 @@ autoscaling:
 
 env:
   KAFKA_BROKERS: "$(KAFKA_BOOTSTRAP_SERVERS)"
-  DATABASE_URL: "postgresql://pulseadmin:$(DB_PASSWORD)@$(DB_HOST):5432/pulsedb?sslmode=require"
-  LOG_LEVEL: "info"
-  ENVIRONMENT: "prod"
+  DYNAMODB_TABLE: "pulse-notifications"
+
+  # Traces go to the collector, which fans out to Jaeger and Datadog.
+  OTEL_ENDPOINT: "otel-collector:4317"
 
 envFrom:
   - secretRef:

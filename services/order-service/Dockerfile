@@ -6,12 +6,13 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
-RUN go build -o /app/server ./cmd/server
+RUN go build -o /app/server .
 
 FROM alpine:3.19
 
 COPY --from=builder /app/server /app/server
 
-EXPOSE 50051
+# 50052 = gRPC, 9090 = Prometheus metrics
+EXPOSE 50052 9090
 
 ENTRYPOINT ["/app/server"]

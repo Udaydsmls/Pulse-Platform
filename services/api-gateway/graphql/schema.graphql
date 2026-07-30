@@ -3,6 +3,7 @@ type User {
   email: String!
   name: String!
   provider: String
+  createdAt: String
 }
 
 type OrderItem {
@@ -25,6 +26,12 @@ type StockStatus {
   stockLevel: Int!
 }
 
+input OrderItemInput {
+  productId: ID!
+  quantity: Int!
+  unitPrice: Float!
+}
+
 type Query {
   me: User
   order(orderId: ID!): Order
@@ -32,19 +39,8 @@ type Query {
 }
 
 type Mutation {
-  register(email: String!, password: String!, name: String!): AuthPayload!
-  login(email: String!, password: String!): AuthPayload!
+  "Starts the order saga and returns the order once it is recorded."
   createOrder(items: [OrderItemInput!]!): Order!
+  "Cancels an order, which releases any stock reserved for it."
   cancelOrder(orderId: ID!): Boolean!
-}
-
-type AuthPayload {
-  token: String!
-  userId: ID!
-}
-
-input OrderItemInput {
-  productId: ID!
-  quantity: Int!
-  unitPrice: Float!
 }

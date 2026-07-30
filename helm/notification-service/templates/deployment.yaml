@@ -47,22 +47,18 @@ spec:
             - name: metrics
               containerPort: 9090
               protocol: TCP
-          # notification-service has no gRPC port — use process-existence exec probes.
+          # This service has no gRPC port, so the probes check the metrics
+          # endpoint instead. That at least proves the process is serving —
+          # a "is PID 1 alive" exec probe can't fail while the container runs.
           readinessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - "test -f /tmp/ready || kill -0 1"
+            tcpSocket:
+              port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
-            exec:
-              command:
-                - /bin/sh
-                - -c
-                - "kill -0 1"
+            tcpSocket:
+              port: metrics
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3

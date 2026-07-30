@@ -1,12 +1,21 @@
 FROM golang:1.22-alpine AS builder
-WORKDIR /app
+
+WORKDIR /build
+
 COPY go.mod go.sum ./
 RUN go mod download
+
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /notification-service ./cmd/server
+RUN go build -o /app/server .
 
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /notification-service .
-ENTRYPOINT ["./notification-service"]
+
+# ca-certificates so the AWS SDK can reach DynamoDB over TLS
+RUN apk --no-cache add ca-certificates
+
+COPY --from=builder /app/server /app/server
+
+# 9090 = Prometheus metrics. No gRPC port: this service only consumes events.
+EXPOSE 9090
+
+ENTRYPOINT ["/app/server"]

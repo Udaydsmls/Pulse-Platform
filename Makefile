@@ -1,111 +1,106 @@
-## pulse-platform — top-level Makefile
-## Run 'make help' to list all available targets.
+## Pulse Platform — run 'make help' to list targets.
 
-SHELL := /usr/bin/env bash
-.ONESHELL:
-
-PROTO_DIR    := proto
 GO_SERVICES  := user-service order-service inventory-service payment-service notification-service
 ALL_SERVICES := $(GO_SERVICES) api-gateway
 
-.PHONY: help proto build test lint docker-build dev-up dev-down dev-bootstrap run-all $(GO_SERVICES)
+# Services with a .proto contract. payment and notification are pure Kafka
+# consumers with no gRPC API, so they have no proto to generate.
+PROTO_SERVICES := user order inventory
 
-# ─── Help ────────────────────────────────────────────────────────────────────
-## help: Print this help message
+.PHONY: help setup proto deps build test lint docker-build dev-up dev-down dev-bootstrap seed run-all
+
+## help: List available targets
 help:
-	@grep -E '^## [a-zA-Z_-]+:' $(MAKEFILE_LIST) | \
-	  sed 's/^## //' | \
-	  awk -F: '{ printf "  \033[36m%-20s\033[0m %s\n", $$1, $$2 }'
+	@grep -E '^## [a-zA-Z_-]+:' $(MAKEFILE_LIST) | sed 's/^## //' | \
+	  awk -F': ' '{ printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2 }'
 
-# ─── Proto codegen ───────────────────────────────────────────────────────────
-## proto: Regenerate gRPC stubs for all Go services from proto/ definitions
+# ─── One-time setup ──────────────────────────────────────────────────────────
+## setup: Generate protobuf code and resolve Go dependencies (run this first)
+setup: proto deps
+
+## proto: Generate Go gRPC code from proto/ into each service's gen/pb/
 proto:
-	@which protoc          >/dev/null || { echo "ERROR: protoc not found"; exit 1; }
-	@which protoc-gen-go   >/dev/null || { echo "ERROR: protoc-gen-go not found — run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"; exit 1; }
-	@which protoc-gen-go-grpc >/dev/null || { echo "ERROR: protoc-gen-go-grpc not found — run: go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest"; exit 1; }
-	@for svc in user order inventory payment; do \
-	  OUT_DIR="services/$${svc}-service/gen/pb"; \
-	  mkdir -p "$${OUT_DIR}"; \
-	  echo "  Generating stubs for $${svc}.proto → $${OUT_DIR}"; \
-	  protoc \
-	    --proto_path=$(PROTO_DIR) \
-	    --go_out="$${OUT_DIR}" \
-	    --go_opt=paths=source_relative \
-	    --go-grpc_out="$${OUT_DIR}" \
-	    --go-grpc_opt=paths=source_relative \
-	    $(PROTO_DIR)/$${svc}.proto; \
+	@command -v protoc >/dev/null || { echo "ERROR: protoc not installed"; exit 1; }
+	@command -v protoc-gen-go >/dev/null || { echo "ERROR: run: go install google.golang.org/protobuf/cmd/protoc-gen-go@latest"; exit 1; }
+	@command -v protoc-gen-go-grpc >/dev/null || { echo "ERROR: run: go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest"; exit 1; }
+	@for svc in $(PROTO_SERVICES); do \
+	  out="services/$$svc-service/gen/pb"; \
+	  mkdir -p "$$out"; \
+	  echo "  proto/$$svc.proto -> $$out"; \
+	  protoc --proto_path=proto \
+	    --go_out="$$out" --go_opt=paths=source_relative \
+	    --go-grpc_out="$$out" --go-grpc_opt=paths=source_relative \
+	    "proto/$$svc.proto" || exit 1; \
 	done
-	@echo "proto codegen complete."
+	@echo "proto generation complete."
 
-# ─── Build ───────────────────────────────────────────────────────────────────
-## build: Compile all Go services and transpile api-gateway TypeScript
+## deps: Resolve Go modules and write go.sum for each service
+deps:
+	@for svc in $(GO_SERVICES); do \
+	  echo "  go mod tidy services/$$svc"; \
+	  (cd services/$$svc && go mod tidy) || exit 1; \
+	done
+	@echo "  npm install services/api-gateway"
+	@cd services/api-gateway && npm install
+
+# ─── Build, test, lint ───────────────────────────────────────────────────────
+## build: Compile every service
 build:
-	@echo "==> Building Go services..."
 	@for svc in $(GO_SERVICES); do \
 	  echo "  go build services/$$svc"; \
-	  (cd services/$$svc && go build ./...); \
+	  (cd services/$$svc && go build ./...) || exit 1; \
 	done
-	@echo "==> Building api-gateway (tsc)..."
-	(cd services/api-gateway && npm run build)
-	@echo "Build complete."
+	@echo "  tsc services/api-gateway"
+	@cd services/api-gateway && npm run build
 
-# ─── Test ────────────────────────────────────────────────────────────────────
-## test: Run unit tests for all services (Go race detector + api-gateway jest)
+## test: Run unit tests for every service
 test:
-	@echo "==> Testing Go services..."
 	@for svc in $(GO_SERVICES); do \
 	  echo "  go test services/$$svc"; \
-	  (cd services/$$svc && go test ./... -race -coverprofile=coverage.out -covermode=atomic); \
+	  (cd services/$$svc && go test ./... -race) || exit 1; \
 	done
-	@echo "==> Testing api-gateway..."
-	(cd services/api-gateway && npm test)
-	@echo "All tests passed."
+	@echo "  jest services/api-gateway"
+	@cd services/api-gateway && npm test
 
-# ─── Lint ────────────────────────────────────────────────────────────────────
-## lint: Run golangci-lint on Go services and ESLint on api-gateway
+## lint: Run golangci-lint and eslint
 lint:
-	@echo "==> Linting Go services..."
 	@for svc in $(GO_SERVICES); do \
 	  echo "  golangci-lint services/$$svc"; \
-	  (cd services/$$svc && golangci-lint run ./...); \
+	  (cd services/$$svc && golangci-lint run ./...) || exit 1; \
 	done
-	@echo "==> Linting api-gateway..."
-	(cd services/api-gateway && npm run lint)
-	@echo "Lint complete."
+	@cd services/api-gateway && npm run lint
 
-# ─── Docker ──────────────────────────────────────────────────────────────────
-## docker-build: Build Docker images for all services (tagged :local)
+## docker-build: Build all Docker images tagged :local
 docker-build:
-	@echo "==> Building Docker images..."
-	@for svc in $(ALL_SERVICES); do \
-	  echo "  docker build services/$$svc → pulse-platform/$$svc:local"; \
-	  docker build -t pulse-platform/$$svc:local services/$$svc; \
+	@for svc in $(GO_SERVICES); do \
+	  echo "  building pulse-platform/$$svc:local"; \
+	  docker build -t pulse-platform/$$svc:local services/$$svc || exit 1; \
 	done
-	@echo "Docker images built."
+	@# The gateway builds from the repo root so it can copy in proto/.
+	docker build -f services/api-gateway/Dockerfile -t pulse-platform/api-gateway:local .
 
-# ─── Dev environment ─────────────────────────────────────────────────────────
-## dev-up: Start local infrastructure (Kafka, Postgres, Redis, Elasticsearch)
+# ─── Local development ───────────────────────────────────────────────────────
+## dev-up: Start Kafka, Postgres and Redis
 dev-up:
 	docker compose -f docker-compose.dev.yml up -d
 
-## dev-down: Stop and remove local infrastructure containers
+## dev-down: Stop local infrastructure
 dev-down:
 	docker compose -f docker-compose.dev.yml down
 
-## dev-bootstrap: Start infrastructure, wait for Kafka, create topics
-dev-bootstrap: dev-up
+## dev-bootstrap: Start infrastructure and create Kafka topics
+dev-bootstrap:
 	bash scripts/bootstrap.sh
 
-# ─── Run all services locally ────────────────────────────────────────────────
-## run-all: Start all services in the background (requires local infra running)
+## seed: Seed stock and walk an order through both saga paths
+seed:
+	bash scripts/seed_data.sh
+
+## run-all: Run every service locally in the background
 run-all:
-	@echo "==> Starting all services in background..."
+	@echo "Starting services. Stop them with: pkill -f 'go run'"
 	@for svc in $(GO_SERVICES); do \
-	  echo "  Starting $$svc..."; \
-	  (cd services/$$svc && go run ./... &); \
+	  echo "  $$svc"; \
+	  (cd services/$$svc && go run . &); \
 	done
-	@echo "  Starting api-gateway..."
-	(cd services/api-gateway && npm run dev &)
-	@echo ""
-	@echo "All services started. API Gateway: http://localhost:3000"
-	@echo "To stop: kill %% or pkill -f 'go run'"
+	@cd services/api-gateway && npm run dev

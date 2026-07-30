@@ -1,3 +1,6 @@
+# Circuit breaking for the three services the gateway calls over gRPC.
+# payment-service and notification-service are pure Kafka consumers with no
+# Service to route to, so they need no DestinationRule.
 apiVersion: networking.istio.io/v1beta1
 kind: DestinationRule
 metadata:
@@ -47,48 +50,6 @@ metadata:
   namespace: pulse-platform
 spec:
   host: inventory-service
-  trafficPolicy:
-    connectionPool:
-      tcp:
-        maxConnections: 100
-      http:
-        h2UpgradePolicy: UPGRADE
-        http1MaxPendingRequests: 100
-    outlierDetection:
-      consecutiveGatewayErrors: 5
-      interval: 30s
-      baseEjectionTime: 30s
-      maxEjectionPercent: 50
-      splitExternalLocalOriginErrors: true
----
-apiVersion: networking.istio.io/v1beta1
-kind: DestinationRule
-metadata:
-  name: payment-service
-  namespace: pulse-platform
-spec:
-  host: payment-service
-  trafficPolicy:
-    connectionPool:
-      tcp:
-        maxConnections: 100
-      http:
-        h2UpgradePolicy: UPGRADE
-        http1MaxPendingRequests: 100
-    outlierDetection:
-      consecutiveGatewayErrors: 5
-      interval: 30s
-      baseEjectionTime: 30s
-      maxEjectionPercent: 50
-      splitExternalLocalOriginErrors: true
----
-apiVersion: networking.istio.io/v1beta1
-kind: DestinationRule
-metadata:
-  name: notification-service
-  namespace: pulse-platform
-spec:
-  host: notification-service
   trafficPolicy:
     connectionPool:
       tcp:

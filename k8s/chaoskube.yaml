@@ -1,0 +1,83 @@
+# chaoskube kills a random pod in the pulse-platform namespace every 10 minutes.
+#
+# The point is to prove the platform tolerates it: the saga is driven by Kafka
+# events with committed offsets, so a service that dies mid-flow picks up where
+# it left off when the consumer group rebalances. Compensating events are keyed
+# by order ID and only act on active reservations, so a redelivered
+# order.cancelled is a no-op rather than a double release.
+#
+# Deliberately excludes itself and the api-gateway, so killing pods can't take
+# out the chaos runner or the only internet-facing entry point.
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: chaoskube
+  namespace: pulse-platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: chaoskube
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["list", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: chaoskube
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: chaoskube
+subjects:
+  - kind: ServiceAccount
+    name: chaoskube
+    namespace: pulse-platform
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: chaoskube
+  namespace: pulse-platform
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: chaoskube
+  template:
+    metadata:
+      labels:
+        app: chaoskube
+      annotations:
+        # No sidecar: chaoskube talks to the Kubernetes API, not the mesh.
+        sidecar.istio.io/inject: "false"
+    spec:
+      serviceAccountName: chaoskube
+      containers:
+        - name: chaoskube
+          image: ghcr.io/linki/chaoskube:v0.34.0
+          args:
+            - --interval=10m
+            - --namespaces=pulse-platform
+            - --excluded-pod-names=chaoskube,api-gateway
+            # Weekday business hours only, so overnight runs stay clean.
+            - --excluded-weekdays=Sat,Sun
+            - --excluded-times-of-day=22:00-08:00
+            - --timezone=UTC
+            - --metrics-address=:8080
+            # Start with --dry-run=true and check the logs before letting it
+            # actually delete anything.
+            - --dry-run=false
+          resources:
+            requests:
+              cpu: "10m"
+              memory: "32Mi"
+            limits:
+              cpu: "100m"
+              memory: "128Mi"

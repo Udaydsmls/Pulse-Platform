@@ -25,7 +25,7 @@ spec:
         {{- toYaml .Values.podAnnotations | nindent 8 }}
     spec:
       serviceAccountName: {{ include "payment-service.serviceAccountName" . }}
-      terminationGracePeriodSeconds: 30
+      terminationGracePeriodSeconds: 60
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
@@ -44,21 +44,21 @@ spec:
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
-            - name: grpc
-              containerPort: {{ .Values.service.port }}
-              protocol: TCP
             - name: metrics
               containerPort: 9090
               protocol: TCP
+          # This service has no gRPC port, so the probes check the metrics
+          # endpoint instead. That at least proves the process is serving —
+          # a "is PID 1 alive" exec probe can't fail while the container runs.
           readinessProbe:
-            grpc:
-              port: {{ .Values.service.port }}
+            tcpSocket:
+              port: metrics
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
-            grpc:
-              port: {{ .Values.service.port }}
+            tcpSocket:
+              port: metrics
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3

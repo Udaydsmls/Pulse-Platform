@@ -5,9 +5,11 @@ on:
     branches: ["main", "master"]
     paths:
       - "services/api-gateway/**"
+      - "proto/**"
   pull_request:
     paths:
       - "services/api-gateway/**"
+      - "proto/**"
 
 env:
   SERVICE: api-gateway
@@ -16,6 +18,9 @@ env:
   AWS_REGION: us-east-1
   NODE_VERSION: "20"
 
+# The gateway loads the .proto files at runtime rather than generating code from
+# them, so there is no protoc step here — but a proto change can still break it,
+# which is why proto/** is in the path filter.
 jobs:
   test:
     name: Test
@@ -26,24 +31,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: ${{ env.SERVICE_PATH }}/package-lock.json
 
+      # npm install rather than npm ci: package-lock.json is not committed.
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
-      - name: Run tests
+      - name: Test
         run: npm test
-
-      - name: Upload coverage
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-${{ env.SERVICE }}
-          path: ${{ env.SERVICE_PATH }}/coverage
 
   lint:
     name: Lint
@@ -54,15 +51,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: ${{ env.SERVICE_PATH }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: Lint
         run: npm run lint
@@ -71,27 +65,23 @@ jobs:
     name: Build & Push
     runs-on: ubuntu-latest
     needs: [test, lint]
-    defaults:
-      run:
-        working-directory: ${{ env.SERVICE_PATH }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: ${{ env.SERVICE_PATH }}/package-lock.json
 
       - name: Install dependencies
-        run: npm ci
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: npm install
 
       - name: Build
+        working-directory: ${{ env.SERVICE_PATH }}
         run: npm run build
 
       - name: Configure AWS credentials
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -99,17 +89,19 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'push'
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
+      # Built from the repo root, because the image needs proto/ copied in.
       - name: Docker build & push
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'push'
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
+          docker build -f ${{ env.SERVICE_PATH }}/Dockerfile \
+                       -t "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG" \
                        -t "$REGISTRY/$ECR_REPOSITORY:latest" .
           docker push "$REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG"
           docker push "$REGISTRY/$ECR_REPOSITORY:latest"
@@ -124,12 +116,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node.js ${{ env.NODE_VERSION }}
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: ${{ env.SERVICE_PATH }}/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
 
       - name: Snyk scan
         uses: snyk/actions/node@master

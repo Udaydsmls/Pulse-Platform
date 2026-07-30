@@ -1,13 +1,18 @@
 FROM golang:1.22-alpine AS builder
-WORKDIR /app
+
+WORKDIR /build
+
 COPY go.mod go.sum ./
 RUN go mod download
+
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /inventory-service ./cmd/server
+RUN go build -o /app/server .
 
 FROM alpine:3.19
-RUN apk --no-cache add ca-certificates tzdata
-WORKDIR /app
-COPY --from=builder /inventory-service .
-EXPOSE 50052
-ENTRYPOINT ["./inventory-service"]
+
+COPY --from=builder /app/server /app/server
+
+# 50053 = gRPC, 9090 = Prometheus metrics
+EXPOSE 50053 9090
+
+ENTRYPOINT ["/app/server"]
