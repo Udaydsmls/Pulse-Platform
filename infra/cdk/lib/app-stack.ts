@@ -20,14 +20,49 @@ const SERVICES = [
 
 type ServiceName = typeof SERVICES[number];
 
-/** Maps each service to the Secrets Manager secret names it needs. */
-const SERVICE_SECRETS: Record<ServiceName, string[]> = {
-  'user-service':         ['pulse-platform/prod/rds-password', 'pulse-platform/prod/oauth-secret'],
-  'order-service':        ['pulse-platform/prod/rds-password'],
-  'inventory-service':    ['pulse-platform/prod/rds-password'],
-  'payment-service':      ['pulse-platform/prod/rds-password', 'pulse-platform/prod/stripe-secret'],
-  'notification-service': ['pulse-platform/prod/rds-password', 'pulse-platform/prod/smtp-secret'],
-  'api-gateway':          ['pulse-platform/prod/oauth-secret', 'pulse-platform/prod/jwt-secret'],
+const SECRET_PREFIX = 'pulse-platform/prod';
+
+/**
+ * Environment variable name -> Secrets Manager secret name.
+ *
+ * The keys must match the variable names the service actually reads, and the
+ * ones the Helm values reference with $(VAR) — Kubernetes expands those from
+ * other variables on the same container, all of which land here.
+ */
+type SecretMap = Record<string, string>;
+
+// Every service that talks to Postgres or Kafka needs these.
+const DATABASE: SecretMap = {
+  DB_HOST: `${SECRET_PREFIX}/rds-host`,
+  DB_PASSWORD: `${SECRET_PREFIX}/rds-password`,
+};
+
+const KAFKA: SecretMap = {
+  KAFKA_BOOTSTRAP_SERVERS: `${SECRET_PREFIX}/msk-bootstrap-servers`,
+};
+
+const SERVICE_SECRETS: Record<ServiceName, SecretMap> = {
+  'user-service': {
+    ...DATABASE,
+    ...KAFKA,
+    JWT_SECRET: `${SECRET_PREFIX}/jwt-secret`,
+  },
+
+  'order-service': { ...DATABASE, ...KAFKA },
+  'inventory-service': { ...DATABASE, ...KAFKA },
+  'payment-service': { ...DATABASE, ...KAFKA },
+
+  // DynamoDB access comes from the pod's IAM role, not a secret, so this
+  // service only needs Kafka.
+  'notification-service': { ...KAFKA },
+
+  // The gateway has no database. It shares the JWT secret with user-service so
+  // it can verify the tokens user-service signs.
+  'api-gateway': {
+    ...KAFKA,
+    JWT_SECRET: `${SECRET_PREFIX}/jwt-secret`,
+    REDIS_URL: `${SECRET_PREFIX}/elasticache-url`,
+  },
 };
 
 export class AppStack extends cdk.Stack {
@@ -82,14 +117,14 @@ export class AppStack extends cdk.Stack {
     // ── ExternalSecret per service ────────────────────────────────────────────
 
     SERVICES.forEach((service) => {
-      const secrets = SERVICE_SECRETS[service];
-
-      const remoteRefs = secrets.map((secretName) => ({
-        secretKey: secretName.split('/').pop()!, // use last segment as key
-        remoteRef: {
-          key: secretName,
-        },
-      }));
+      // secretKey becomes the key in the Kubernetes secret, which envFrom turns
+      // into an environment variable of the same name.
+      const remoteRefs = Object.entries(SERVICE_SECRETS[service]).map(
+        ([envVar, secretName]) => ({
+          secretKey: envVar,
+          remoteRef: { key: secretName },
+        }),
+      );
 
       cluster.addManifest(`ExternalSecret-${service}`, {
         apiVersion: 'external-secrets.io/v1beta1',

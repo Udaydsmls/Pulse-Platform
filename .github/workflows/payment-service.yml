@@ -5,12 +5,12 @@ on:
     branches: ["main", "master"]
     paths:
       - "services/payment-service/**"
-      - "proto/**"
   pull_request:
     paths:
       - "services/payment-service/**"
-      - "proto/**"
 
+# This service has no .proto contract — it only consumes Kafka events — so
+# unlike the others it needs no protoc step.
 env:
   SERVICE: payment-service
   SERVICE_PATH: services/payment-service
@@ -28,23 +28,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-${{ env.GO_VERSION }}-
-
-      - name: Download dependencies
-        run: go mod download
+      # go.sum is not committed, so resolve rather than download.
+      - name: Resolve dependencies
+        run: go mod tidy
 
       - name: Vet
         run: go vet ./...
@@ -61,16 +51,16 @@ jobs:
   lint:
     name: Lint
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ env.SERVICE_PATH }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - name: Resolve dependencies
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: go mod tidy
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v6
@@ -89,26 +79,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
-      - name: Cache Go modules
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/go-build
-            ~/go/pkg/mod
-          key: ${{ runner.os }}-go-${{ env.GO_VERSION }}-${{ hashFiles('**/go.sum') }}
-          restore-keys: |
-            ${{ runner.os }}-go-${{ env.GO_VERSION }}-
+      - name: Resolve dependencies
+        run: go mod tidy
 
       - name: Go build
         run: go build ./...
 
       - name: Configure AWS credentials
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'push'
         uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
@@ -116,12 +98,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'push'
         id: ecr-login
         uses: aws-actions/amazon-ecr-login@v2
 
       - name: Docker build & push
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: github.event_name == 'push'
         env:
           REGISTRY: ${{ steps.ecr-login.outputs.registry }}
           IMAGE_TAG: ${{ github.sha }}
@@ -135,20 +117,20 @@ jobs:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
     needs: [test]
-    defaults:
-      run:
-        working-directory: ${{ env.SERVICE_PATH }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Go ${{ env.GO_VERSION }}
-        uses: actions/setup-go@v5
+      - uses: actions/setup-go@v5
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - name: Resolve dependencies
+        working-directory: ${{ env.SERVICE_PATH }}
+        run: go mod tidy
 
       - name: Snyk scan
         uses: snyk/actions/golang@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high
+          args: --severity-threshold=high ${{ env.SERVICE_PATH }}

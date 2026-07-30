@@ -5,10 +5,11 @@ image:
   tag: "latest"
   pullPolicy: IfNotPresent
 
+# payment-service is a Kafka consumer only — no network service needed.
 service:
-  enabled: true
+  enabled: false
   type: ClusterIP
-  port: 50053
+  port: 0
 
 resources:
   requests:

@@ -50,15 +50,18 @@ spec:
             - name: metrics
               containerPort: 9090
               protocol: TCP
+          # A TCP check rather than a gRPC one: these services don't register
+          # the grpc.health.v1.Health service, so a grpc probe would always
+          # fail and the pod would never go Ready.
           readinessProbe:
-            grpc:
-              port: {{ .Values.service.port }}
+            tcpSocket:
+              port: grpc
             initialDelaySeconds: 5
             periodSeconds: 10
             failureThreshold: 3
           livenessProbe:
-            grpc:
-              port: {{ .Values.service.port }}
+            tcpSocket:
+              port: grpc
             initialDelaySeconds: 15
             periodSeconds: 20
             failureThreshold: 3

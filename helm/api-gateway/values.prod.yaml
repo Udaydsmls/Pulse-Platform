@@ -13,12 +13,27 @@ autoscaling:
 
 env:
   PORT: "3000"
-  GRPC_PORT: "3000"
-  KAFKA_BROKERS: "$(KAFKA_BOOTSTRAP_SERVERS)"
-  DATABASE_URL: "postgresql://pulseadmin:$(DB_PASSWORD)@$(DB_HOST):5432/pulsedb?sslmode=require"
-  LOG_LEVEL: "info"
-  ENVIRONMENT: "prod"
 
+  # In-cluster service names and the ports each Go service listens on.
+  GRPC_USER_SERVICE_ADDR: "user-service:50051"
+  GRPC_ORDER_SERVICE_ADDR: "order-service:50052"
+  GRPC_INVENTORY_SERVICE_ADDR: "inventory-service:50053"
+
+  # $(VAR) is expanded by Kubernetes from the other variables on this container,
+  # which come from the secret below.
+  KAFKA_BROKERS: "$(KAFKA_BOOTSTRAP_SERVERS)"
+
+  CORS_ORIGINS: "https://pulse-platform.example.com"
+
+  # Traces go to the collector, which fans out to Jaeger and Datadog. The Node
+  # SDK configures itself from these standard OTEL_* variables, which is why the
+  # names differ from the Go services' OTEL_ENDPOINT.
+  OTEL_SERVICE_NAME: "api-gateway"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4318"
+  OTEL_EXPORTER_OTLP_PROTOCOL: "http/protobuf"
+
+# JWT_SECRET, REDIS_URL and KAFKA_BOOTSTRAP_SERVERS are synced into this secret
+# from AWS Secrets Manager by External Secrets.
 envFrom:
   - secretRef:
       name: api-gateway-secrets

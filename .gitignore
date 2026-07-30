@@ -58,6 +58,8 @@ load_tests/results/
 # ─── Helm chart archives ──────────────────────────────────────────────────────
 charts/*.tgz
 
-# ─── DO NOT IGNORE: keep generated protobuf stubs ────────────────────────────
-# gen/pb/ directories are intentionally committed
-!**/gen/pb/
+# ─── Generated protobuf code ──────────────────────────────────────────────────
+# Produced by `make proto` from the .proto files in proto/, which are the real
+# source of truth. Not committed, so a stale checked-in copy can't drift from
+# the contract.
+services/*/gen/

@@ -16,7 +16,9 @@ message OrderItem {
 
 message CreateOrderRequest {
   string user_id = 1;
-  string tenant_id = 2;
+  // Carried through the saga so notification-service can email the customer
+  // without an extra lookup back to user-service.
+  string email = 2;
   repeated OrderItem items = 3;
 }
 

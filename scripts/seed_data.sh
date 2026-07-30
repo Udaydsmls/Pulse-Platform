@@ -1,97 +1,92 @@
 #!/usr/bin/env bash
+# Seeds stock, then walks an order through the saga twice: once succeeding and
+# once failing, so you can watch the compensating rollback release the stock.
+#
+# Run after `make run-all`, once the services have created their tables.
 set -euo pipefail
 
 GATEWAY_URL="${GATEWAY_URL:-http://localhost:3000}"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+COMPOSE="docker compose -f ${PROJECT_ROOT}/docker-compose.dev.yml"
 
-echo "==> Seeding development data against ${GATEWAY_URL}"
+EMAIL="testuser@pulse-platform.dev"
+PASSWORD="Test@123456"
+
+psql() {
+  $COMPOSE exec -T postgres psql -U pulse -d pulsedb -tAc "$1"
+}
+
+stock_of() {
+  psql "SELECT stock_level - reserved FROM stock_items WHERE product_id = '$1';"
+}
+
+# ── Stock ────────────────────────────────────────────────────────────────────
+# Product IDs match the catalogue the gateway serves at GET /products.
+echo "==> seeding stock"
+psql "
+  INSERT INTO stock_items (product_id, stock_level) VALUES
+    ('p1', 150), ('p2', 75), ('p3', 200)
+  ON CONFLICT (product_id) DO UPDATE SET stock_level = EXCLUDED.stock_level, reserved = 0;
+"
+psql "DELETE FROM reservations;"
+echo "    p1=$(stock_of p1) p2=$(stock_of p2) p3=$(stock_of p3) available"
+
+# ── Account ──────────────────────────────────────────────────────────────────
 echo ""
+echo "==> registering ${EMAIL} (ignored if it already exists)"
+curl -s -o /dev/null -X POST "${GATEWAY_URL}/auth/register" \
+  -H 'Content-Type: application/json' \
+  -d "{\"name\":\"Test User\",\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}" || true
 
-# ── 1. Register a test user ──────────────────────────────────────────────────
-echo "--- Step 1: Register test user ---"
-REGISTER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${GATEWAY_URL}/auth/register" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "name":     "Test User",
-    "email":    "testuser@pulse-platform.dev",
-    "password": "Test@123456"
-  }')
+TOKEN=$(curl -s -X POST "${GATEWAY_URL}/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"${EMAIL}\",\"password\":\"${PASSWORD}\"}" |
+  grep -o '"token":"[^"]*"' | cut -d'"' -f4)
 
-REGISTER_BODY=$(echo "${REGISTER_RESPONSE}" | head -n -1)
-REGISTER_STATUS=$(echo "${REGISTER_RESPONSE}" | tail -n 1)
-
-echo "    Status: ${REGISTER_STATUS}"
-echo "    Body:   ${REGISTER_BODY}"
-
-if [ "${REGISTER_STATUS}" != "201" ] && [ "${REGISTER_STATUS}" != "200" ]; then
-  echo "    WARN: Unexpected status ${REGISTER_STATUS}. User may already exist — continuing to login."
-fi
-
-# ── 2. Login to get auth token ───────────────────────────────────────────────
-echo ""
-echo "--- Step 2: Login ---"
-LOGIN_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${GATEWAY_URL}/auth/login" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email":    "testuser@pulse-platform.dev",
-    "password": "Test@123456"
-  }')
-
-LOGIN_BODY=$(echo "${LOGIN_RESPONSE}" | head -n -1)
-LOGIN_STATUS=$(echo "${LOGIN_RESPONSE}" | tail -n 1)
-
-echo "    Status: ${LOGIN_STATUS}"
-
-if [ "${LOGIN_STATUS}" != "200" ]; then
-  echo "ERROR: Login failed with status ${LOGIN_STATUS}. Body: ${LOGIN_BODY}" >&2
+if [ -z "${TOKEN}" ]; then
+  echo "ERROR: could not log in. Is user-service running?" >&2
   exit 1
 fi
+echo "    logged in"
 
-# Extract token — works for {"token":"..."} or {"access_token":"..."}
-AUTH_TOKEN=$(echo "${LOGIN_BODY}" | grep -o '"token"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"\s*:\s*"\([^"]*\)"/\1/')
-if [ -z "${AUTH_TOKEN}" ]; then
-  AUTH_TOKEN=$(echo "${LOGIN_BODY}" | grep -o '"access_token"\s*:\s*"[^"]*"' | head -1 | sed 's/.*"\s*:\s*"\([^"]*\)"/\1/')
-fi
+place_order() {
+  curl -s -X POST "${GATEWAY_URL}/orders" \
+    -H 'Content-Type: application/json' \
+    -H "Authorization: Bearer ${TOKEN}" \
+    -d "{\"items\":$1}"
+}
 
-if [ -z "${AUTH_TOKEN}" ]; then
-  echo "ERROR: Could not extract auth token from login response: ${LOGIN_BODY}" >&2
-  exit 1
-fi
+order_status() {
+  psql "SELECT status FROM orders WHERE id = '$1';"
+}
 
-echo "    Token obtained: ${AUTH_TOKEN:0:20}..."
-
-# ── 3. Create a test order ───────────────────────────────────────────────────
+# ── Happy path ───────────────────────────────────────────────────────────────
 echo ""
-echo "--- Step 3: Create test order ---"
-ORDER_RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "${GATEWAY_URL}/orders" \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer ${AUTH_TOKEN}" \
-  -d '{
-    "items": [
-      { "productId": "prod-001", "quantity": 2, "unitPrice": 29.99 },
-      { "productId": "prod-002", "quantity": 1, "unitPrice": 49.99 }
-    ],
-    "shippingAddress": {
-      "street":  "123 Test Street",
-      "city":    "Boston",
-      "state":   "MA",
-      "zip":     "02101",
-      "country": "US"
-    }
-  }')
+echo "==> happy path: 2x p1 at 29.99 = 59.98, under the decline limit"
+ORDER_ID=$(place_order '[{"productId":"p1","quantity":2,"unitPrice":29.99}]' |
+  grep -o '"orderId":"[^"]*"' | cut -d'"' -f4)
+echo "    order ${ORDER_ID} created"
 
-ORDER_BODY=$(echo "${ORDER_RESPONSE}" | head -n -1)
-ORDER_STATUS=$(echo "${ORDER_RESPONSE}" | tail -n 1)
+# The saga runs across three services over Kafka, so give it a moment.
+sleep 5
+echo "    status:      $(order_status "${ORDER_ID}")   (expected: confirmed)"
+echo "    p1 available: $(stock_of p1)          (expected: 148, stock stays reserved)"
 
-echo "    Status: ${ORDER_STATUS}"
-echo "    Body:   ${ORDER_BODY}"
-
-if [ "${ORDER_STATUS}" != "201" ] && [ "${ORDER_STATUS}" != "200" ]; then
-  echo "ERROR: Order creation failed with status ${ORDER_STATUS}." >&2
-  exit 1
-fi
-
-# ── 4. Done ──────────────────────────────────────────────────────────────────
+# ── Rollback path ────────────────────────────────────────────────────────────
 echo ""
-echo "==> Seed complete."
-echo "    User:  testuser@pulse-platform.dev / Test@123456"
-echo "    Token: ${AUTH_TOKEN:0:20}..."
+echo "==> rollback path: 100x p3 at 99.99 = 9999.00, over the decline limit"
+echo "    stock is reserved first, then payment fails and it must be released"
+BEFORE=$(stock_of p3)
+
+FAIL_ORDER_ID=$(place_order '[{"productId":"p3","quantity":100,"unitPrice":99.99}]' |
+  grep -o '"orderId":"[^"]*"' | cut -d'"' -f4)
+echo "    order ${FAIL_ORDER_ID} created"
+
+sleep 5
+echo "    status:       $(order_status "${FAIL_ORDER_ID}")   (expected: cancelled)"
+echo "    p3 available: $(stock_of p3) (was ${BEFORE} — the compensating event put it back)"
+
+echo ""
+echo "==> done. Credentials: ${EMAIL} / ${PASSWORD}"
+echo "    Watch updates live:"
+echo "      websocat 'ws://localhost:3000/ws/orders?token=${TOKEN:0:12}...'"

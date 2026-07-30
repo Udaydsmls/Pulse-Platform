@@ -15,8 +15,9 @@ env:
   GRPC_PORT: "50051"
   DATABASE_URL: "postgresql://pulseadmin:$(DB_PASSWORD)@$(DB_HOST):5432/pulsedb?sslmode=require"
   KAFKA_BROKERS: "$(KAFKA_BOOTSTRAP_SERVERS)"
-  LOG_LEVEL: "info"
-  ENVIRONMENT: "prod"
+
+  # Traces go to the collector, which fans out to Jaeger and Datadog.
+  OTEL_ENDPOINT: "otel-collector:4317"
 
 envFrom:
   - secretRef:

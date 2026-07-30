@@ -2,10 +2,11 @@ syntax = "proto3";
 package inventory.v1;
 option go_package = "github.com/pulse-platform/inventory-service/gen/pb;pb";
 
+// Reserving and releasing stock happen over Kafka as part of the order saga,
+// not over gRPC. The only thing worth asking synchronously is whether an item
+// is in stock, which the api-gateway does before showing a product.
 service InventoryService {
   rpc CheckStock(CheckStockRequest) returns (CheckStockResponse);
-  rpc ReserveStock(ReserveStockRequest) returns (ReserveStockResponse);
-  rpc ReleaseStock(ReleaseStockRequest) returns (ReleaseStockResponse);
 }
 
 message CheckStockRequest {
@@ -16,24 +17,4 @@ message CheckStockRequest {
 message CheckStockResponse {
   bool available = 1;
   int32 stock_level = 2;
-}
-
-message ReserveStockRequest {
-  string order_id = 1;
-  string product_id = 2;
-  int32 quantity = 3;
-}
-
-message ReserveStockResponse {
-  bool success = 1;
-  string reservation_id = 2;
-}
-
-message ReleaseStockRequest {
-  string reservation_id = 1;
-  string order_id = 2;
-}
-
-message ReleaseStockResponse {
-  bool success = 1;
 }
