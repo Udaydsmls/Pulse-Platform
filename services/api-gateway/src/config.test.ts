@@ -1,12 +1,5 @@
-/**
- * config.ts reads the environment when the module is first imported, so each
- * test sets up process.env and then re-imports it.
- */
-
-const requiredVars = {
-  JWT_SECRET: 'test-secret',
-  REDIS_URL: 'redis://localhost:6379',
-};
+// config.ts reads the environment when it is first imported, so each test sets
+// up process.env and then re-imports it.
 
 function loadConfig() {
   return require('./config').config as typeof import('./config').config;
@@ -17,27 +10,27 @@ describe('config', () => {
 
   beforeEach(() => {
     jest.resetModules();
-    process.env = { ...originalEnv, ...requiredVars };
+    process.env = { ...originalEnv, JWT_SECRET: 'test-secret' };
   });
 
   afterAll(() => {
     process.env = originalEnv;
   });
 
-  it('throws when a required variable is missing', () => {
+  it('throws when JWT_SECRET is missing', () => {
     delete process.env.JWT_SECRET;
     expect(loadConfig).toThrow('Missing required environment variable: JWT_SECRET');
   });
 
-  it('defaults the service addresses to the ports the Go services listen on', () => {
+  it('defaults the service URLs to the ports the Go services listen on', () => {
     const config = loadConfig();
-    expect(config.userServiceAddr).toBe('localhost:50051');
-    expect(config.orderServiceAddr).toBe('localhost:50052');
-    expect(config.inventoryServiceAddr).toBe('localhost:50053');
+    expect(config.userServiceUrl).toBe('http://localhost:8081');
+    expect(config.orderServiceUrl).toBe('http://localhost:8082');
+    expect(config.inventoryServiceUrl).toBe('http://localhost:8083');
   });
 
-  it('splits comma-separated lists', () => {
-    process.env.KAFKA_BROKERS = 'a:9092,b:9092';
-    expect(loadConfig().kafkaBrokers).toEqual(['a:9092', 'b:9092']);
+  it('reads the service URLs from the environment', () => {
+    process.env.USER_SERVICE_URL = 'http://user-service:8081';
+    expect(loadConfig().userServiceUrl).toBe('http://user-service:8081');
   });
 });
