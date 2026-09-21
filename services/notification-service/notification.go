@@ -6,36 +6,32 @@ import (
 	"time"
 )
 
-// Log is one dispatched notification, stored in DynamoDB so there is a record
-// of what each customer was told and when.
-type Log struct {
+// Notification is one message that was sent to a customer.
+type Notification struct {
 	UserID    string
-	Timestamp string
 	EventType string
 	Channel   string
 	Message   string
+	CreatedAt time.Time
 }
 
-// NewLog builds a log entry. Timestamp is the DynamoDB sort key, so it is
-// stored as an RFC 3339 string that sorts chronologically.
-func NewLog(userID, eventType, channel, message string) *Log {
-	return &Log{
+func NewNotification(userID, eventType, channel, message string) *Notification {
+	return &Notification{
 		UserID:    userID,
-		Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
 		EventType: eventType,
 		Channel:   channel,
 		Message:   message,
+		CreatedAt: time.Now().UTC(),
 	}
 }
 
-// Notifier delivers a message to a customer. Swapping in SendGrid or Twilio
-// means implementing this interface.
+// Notifier delivers a message to a customer.
 type Notifier interface {
 	Notify(ctx context.Context, to, subject, body string) error
 }
 
-// LogNotifier is a stand-in for a real email/SMS provider: it writes what it
-// would have sent to the service log. Keeps the project runnable without
+// LogNotifier stands in for a real email or SMS provider by writing what it
+// would have sent to the log. It keeps the project runnable without any
 // third-party API keys.
 type LogNotifier struct {
 	channel string

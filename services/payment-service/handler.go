@@ -10,8 +10,8 @@ import (
 
 const defaultCurrency = "USD"
 
-// Handler is this service's step in the saga: charge the customer once stock is
-// safely reserved.
+// Handler is this service's step in the saga: charge the customer once the
+// stock has been reserved.
 type Handler struct {
 	db       *DB
 	gateway  Gateway
@@ -25,9 +25,9 @@ func (h *Handler) Handle(ctx context.Context, event Event) error {
 	return h.charge(ctx, event)
 }
 
-// charge records a pending payment, calls the gateway, then publishes the
-// outcome. order-service is waiting on payment.confirmed to finish the order,
-// or on payment.failed to roll the whole thing back.
+// charge saves a pending payment, calls the gateway, then publishes the
+// result. order-service is waiting for payment.confirmed to finish the order,
+// or payment.failed to roll it back.
 func (h *Handler) charge(ctx context.Context, event Event) error {
 	payment := &Payment{
 		ID:        uuid.NewString(),
@@ -39,10 +39,9 @@ func (h *Handler) charge(ctx context.Context, event Event) error {
 		CreatedAt: time.Now().UTC(),
 	}
 
+	// Without a payment row there is no record of the charge, so stop here
+	// rather than charging the card anyway.
 	if err := h.db.Insert(ctx, payment); err != nil {
-		// Without a payment row we'd lose the audit trail, and the saga would
-		// stall with no event either way. Returning the error logs it and
-		// leaves the message to be retried on the next rebalance.
 		return err
 	}
 
@@ -69,8 +68,8 @@ func (h *Handler) charge(ctx context.Context, event Event) error {
 	})
 }
 
-// fail marks the payment failed and publishes payment.failed, which triggers
-// the saga's rollback.
+// fail marks the payment failed and publishes payment.failed, which starts the
+// rollback.
 func (h *Handler) fail(ctx context.Context, payment *Payment, event Event, reason string) error {
 	payment.Status = StatusFailed
 	if err := h.db.UpdateStatus(ctx, payment.ID, payment.Status, ""); err != nil {

@@ -1,32 +1,18 @@
 package main
 
 import (
-	"errors"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-// User is a platform account.
+// User is a registered account.
 type User struct {
 	ID           string
 	Email        string
 	Name         string
 	PasswordHash string
 	CreatedAt    time.Time
-}
-
-func (u *User) Validate() error {
-	if u.Email == "" {
-		return errors.New("email is required")
-	}
-	if u.Name == "" {
-		return errors.New("name is required")
-	}
-	if u.PasswordHash == "" {
-		return errors.New("password is required")
-	}
-	return nil
 }
 
 // hashPassword hashes a plaintext password with bcrypt.
@@ -38,7 +24,7 @@ func hashPassword(password string) (string, error) {
 	return string(hash), nil
 }
 
-// checkPassword reports whether the password matches the stored bcrypt hash.
+// checkPassword reports whether the password matches the stored hash.
 func checkPassword(hash, password string) bool {
 	return bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) == nil
 }

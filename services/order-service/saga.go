@@ -5,28 +5,13 @@ import (
 	"fmt"
 )
 
-// Saga drives the distributed order workflow. Each service does one step and
-// announces the result on Kafka; this type reacts to those results and moves
-// the order forward.
+// Saga tracks an order across the other services. Each one does its step and
+// publishes the result to Kafka; this type reacts and moves the order along.
 //
-// Happy path:
+//	order.created -> inventory.reserved -> payment.confirmed -> order.confirmed
 //
-//	CreateOrder -> order.created
-//	           -> inventory-service reserves stock -> inventory.reserved
-//	           -> payment-service charges the card -> payment.confirmed
-//	           -> order.confirmed
-//
-// There is no distributed transaction to roll back, so every failure step
-// publishes order.cancelled as its compensating event. inventory-service
-// listens for it and releases whatever it reserved:
-//
-//	inventory.failed -> order.cancelled   (nothing reserved yet)
-//	payment.failed   -> order.cancelled   -> stock released
-//	CancelOrder RPC  -> order.cancelled   -> stock released
-//
-// Releasing is keyed by order ID and only touches reservations still marked
-// active, so an order.cancelled with nothing to release is a no-op. That means
-// duplicate deliveries are safe.
+// If a step fails, order.cancelled is published instead. inventory-service
+// listens for it and puts the stock back, which is the rollback.
 type Saga struct {
 	db       *DB
 	producer *Producer
@@ -37,13 +22,9 @@ func (s *Saga) Handle(ctx context.Context, event Event) error {
 	switch event.Type {
 	case "payment.confirmed":
 		return s.Confirm(ctx, event.OrderID, event.TransactionID)
-
 	case "inventory.failed", "payment.failed":
 		return s.Cancel(ctx, event.OrderID, event.Reason)
-
 	default:
-		// Other services' events (inventory.reserved, inventory.released) are
-		// not ours to act on.
 		return nil
 	}
 }
@@ -69,8 +50,8 @@ func (s *Saga) Confirm(ctx context.Context, orderID, transactionID string) error
 	})
 }
 
-// Cancel marks the order cancelled and publishes order.cancelled, which is the
-// compensating event that tells inventory-service to release stock.
+// Cancel marks the order cancelled and publishes order.cancelled, which tells
+// inventory-service to release the stock.
 func (s *Saga) Cancel(ctx context.Context, orderID, reason string) error {
 	order, err := s.db.FindByID(ctx, orderID)
 	if err != nil {

@@ -8,8 +8,8 @@ import (
 
 const tokenTTL = 24 * time.Hour
 
-// Claims is the JWT payload. The api-gateway verifies these tokens and reads
-// userId and email from them, so both services must agree on these names.
+// Claims is the JWT payload. The api-gateway reads these fields back out, so
+// both services have to agree on the names.
 type Claims struct {
 	UserID string `json:"userId"`
 	Email  string `json:"email"`

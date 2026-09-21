@@ -1,106 +1,124 @@
 package main
 
 import (
-	"context"
+	"encoding/json"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/google/uuid"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	"github.com/pulse-platform/user-service/gen/pb"
 )
 
-// UserServer implements the UserService gRPC API.
-type UserServer struct {
-	pb.UnimplementedUserServiceServer
+// Server holds the dependencies the HTTP handlers need.
+type Server struct {
 	db       *DB
 	producer *Producer
 	secret   string
 }
 
+type registerRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+	Name     string `json:"name"`
+}
+
+type loginRequest struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type authResponse struct {
+	UserID string `json:"userId"`
+	Token  string `json:"token"`
+}
+
+type userResponse struct {
+	UserID    string `json:"userId"`
+	Email     string `json:"email"`
+	Name      string `json:"name"`
+	CreatedAt string `json:"createdAt"`
+}
+
 // Register creates an account and returns a JWT.
-func (s *UserServer) Register(ctx context.Context, req *pb.RegisterRequest) (*pb.RegisterResponse, error) {
-	if req.GetEmail() == "" || req.GetPassword() == "" || req.GetName() == "" {
-		return nil, status.Error(codes.InvalidArgument, "email, password and name are required")
+func (s *Server) Register(w http.ResponseWriter, r *http.Request) {
+	var req registerRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
 	}
 
-	hash, err := hashPassword(req.GetPassword())
+	if req.Email == "" || req.Password == "" || req.Name == "" {
+		writeError(w, http.StatusBadRequest, "email, password and name are required")
+		return
+	}
+
+	hash, err := hashPassword(req.Password)
 	if err != nil {
 		log.Printf("hash password: %v", err)
-		return nil, status.Error(codes.Internal, "could not create account")
+		writeError(w, http.StatusInternalServerError, "could not create account")
+		return
 	}
 
 	user := &User{
 		ID:           uuid.NewString(),
-		Email:        req.GetEmail(),
-		Name:         req.GetName(),
+		Email:        req.Email,
+		Name:         req.Name,
 		PasswordHash: hash,
 		CreatedAt:    time.Now().UTC(),
 	}
-	if err := user.Validate(); err != nil {
-		return nil, status.Error(codes.InvalidArgument, err.Error())
-	}
 
-	if err := s.db.Insert(ctx, user); err != nil {
+	if err := s.db.Insert(r.Context(), user); err != nil {
 		// The email column is unique, so a duplicate signup lands here.
-		return nil, status.Error(codes.AlreadyExists, "email already registered")
+		writeError(w, http.StatusConflict, "email already registered")
+		return
 	}
 
-	// The account exists either way, so a publish failure is logged rather than
-	// failing the signup — it only costs the customer a welcome email.
-	if err := s.producer.PublishUserCreated(ctx, user.ID, user.Email); err != nil {
+	// The account exists either way, so a failed publish only costs the
+	// customer a welcome email.
+	if err := s.producer.PublishUserCreated(r.Context(), user.ID, user.Email); err != nil {
 		log.Printf("publish user.created for %s: %v", user.ID, err)
 	}
 
-	return &pb.RegisterResponse{
-		UserId: user.ID,
-		Token:  s.issueToken(user),
-	}, nil
+	writeJSON(w, http.StatusCreated, authResponse{UserID: user.ID, Token: s.issueToken(user)})
 }
 
 // Login checks a password and returns a JWT.
-func (s *UserServer) Login(ctx context.Context, req *pb.LoginRequest) (*pb.LoginResponse, error) {
-	if req.GetEmail() == "" || req.GetPassword() == "" {
-		return nil, status.Error(codes.InvalidArgument, "email and password are required")
+func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
+	var req loginRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid JSON body")
+		return
 	}
 
-	user, err := s.db.FindByEmail(ctx, req.GetEmail())
+	user, err := s.db.FindByEmail(r.Context(), req.Email)
 	// The same message for "no such user" and "wrong password" keeps the API
 	// from confirming which emails are registered.
-	if err != nil || !checkPassword(user.PasswordHash, req.GetPassword()) {
-		return nil, status.Error(codes.Unauthenticated, "invalid credentials")
+	if err != nil || !checkPassword(user.PasswordHash, req.Password) {
+		writeError(w, http.StatusUnauthorized, "invalid credentials")
+		return
 	}
 
-	return &pb.LoginResponse{
-		Token:  s.issueToken(user),
-		UserId: user.ID,
-	}, nil
+	writeJSON(w, http.StatusOK, authResponse{UserID: user.ID, Token: s.issueToken(user)})
 }
 
 // GetUser returns a user profile.
-func (s *UserServer) GetUser(ctx context.Context, req *pb.GetUserRequest) (*pb.GetUserResponse, error) {
-	if req.GetUserId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "user_id is required")
-	}
-
-	user, err := s.db.FindByID(ctx, req.GetUserId())
+func (s *Server) GetUser(w http.ResponseWriter, r *http.Request) {
+	user, err := s.db.FindByID(r.Context(), r.PathValue("id"))
 	if err != nil {
-		return nil, status.Error(codes.NotFound, "user not found")
+		writeError(w, http.StatusNotFound, "user not found")
+		return
 	}
 
-	return &pb.GetUserResponse{
-		UserId:    user.ID,
+	writeJSON(w, http.StatusOK, userResponse{
+		UserID:    user.ID,
 		Email:     user.Email,
 		Name:      user.Name,
 		CreatedAt: user.CreatedAt.Format(time.RFC3339),
-	}, nil
+	})
 }
 
-// issueToken signs a JWT. A signing failure means the service is misconfigured,
-// so it is logged rather than surfaced to the caller.
-func (s *UserServer) issueToken(user *User) string {
+// issueToken signs a JWT for the user.
+func (s *Server) issueToken(user *User) string {
 	token, err := newToken(s.secret, user.ID, user.Email)
 	if err != nil {
 		log.Printf("sign token for %s: %v", user.ID, err)

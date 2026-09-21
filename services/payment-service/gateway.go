@@ -8,18 +8,15 @@ import (
 	"github.com/google/uuid"
 )
 
-// Gateway is the card processor. Keeping it an interface means the mock below
-// can be swapped for the real Stripe SDK without touching the saga handler.
+// Gateway charges a card. It is an interface so the fake below can be swapped
+// for a real payment provider later without touching the handler.
 type Gateway interface {
 	Charge(ctx context.Context, amount float64, currency string) (string, error)
 }
 
-// MockGateway stands in for Stripe. It declines anything over declineOver so the
-// saga's rollback path can be exercised end to end: order something expensive
-// and watch the stock get released.
-//
-// The saga rolls back on any charge failure, so a decline and an outage are
-// handled the same way and don't need to be told apart.
+// MockGateway is a fake payment provider. It declines anything over
+// declineOver, which is how the rollback path can be tried out: order
+// something expensive and watch the stock get released.
 type MockGateway struct {
 	declineOver float64
 }
@@ -29,7 +26,7 @@ func NewMockGateway(declineOver float64) *MockGateway {
 }
 
 func (g *MockGateway) Charge(_ context.Context, amount float64, _ string) (string, error) {
-	// Stand in for the network round trip to the processor.
+	// Pretend to call out to the provider.
 	time.Sleep(50 * time.Millisecond)
 
 	if amount > g.declineOver {

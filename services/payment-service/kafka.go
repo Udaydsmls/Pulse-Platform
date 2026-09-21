@@ -11,23 +11,20 @@ import (
 
 const paymentEventsTopic = "payment.events"
 
-// Event is the message shape every Pulse service uses on Kafka. It is one flat
-// struct rather than a per-event payload type so producers and consumers can't
-// drift apart: a field a service doesn't need is simply empty.
-// This service never looks at the order's line items, so it omits that field —
-// unknown JSON fields are simply ignored on decode.
+// Event is the JSON message shape shared by all the services. Fields a service
+// does not need are just left empty.
 type Event struct {
-	Type          string    `json:"event_type"`
-	OrderID       string    `json:"order_id,omitempty"`
-	UserID        string    `json:"user_id,omitempty"`
+	Type          string    `json:"eventType"`
+	OrderID       string    `json:"orderId,omitempty"`
+	UserID        string    `json:"userId,omitempty"`
 	Email         string    `json:"email,omitempty"`
 	Total         float64   `json:"total,omitempty"`
-	TransactionID string    `json:"transaction_id,omitempty"`
+	TransactionID string    `json:"transactionId,omitempty"`
 	Reason        string    `json:"reason,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
-// Producer publishes payment events.
+// Producer publishes payment events to Kafka.
 type Producer struct {
 	writer *kafka.Writer
 }
@@ -36,9 +33,9 @@ func NewProducer(brokers []string) *Producer {
 	return &Producer{writer: &kafka.Writer{
 		Addr:  kafka.TCP(brokers...),
 		Topic: paymentEventsTopic,
-		// Hash the key so every event for one order goes to the same partition
-		// and stays in order.
-		Balancer:     &kafka.Hash{},
+		// Keying by order ID keeps all the events for one order in order.
+		Balancer: &kafka.Hash{},
+		// Wait for the brokers to confirm the write before returning.
 		RequiredAcks: kafka.RequireAll,
 	}}
 }
@@ -61,9 +58,7 @@ func (p *Producer) Close() error {
 	return p.writer.Close()
 }
 
-// Consumer reads events and passes them to handle. Joining a group by ID means
-// replicas of this service split the partitions between them, and offsets are
-// committed as messages are read.
+// Consumer reads events from Kafka and passes them to handle.
 type Consumer struct {
 	reader *kafka.Reader
 	handle func(context.Context, Event) error
@@ -81,7 +76,7 @@ func NewConsumer(brokers, topics []string, groupID string, handle func(context.C
 	}
 }
 
-// Run consumes until the context is cancelled.
+// Run consumes messages until the context is cancelled.
 func (c *Consumer) Run(ctx context.Context) {
 	for {
 		message, err := c.reader.ReadMessage(ctx)
@@ -95,9 +90,7 @@ func (c *Consumer) Run(ctx context.Context) {
 
 		var event Event
 		if err := json.Unmarshal(message.Value, &event); err != nil {
-			// A message we can't parse will never parse, so skip it rather than
-			// retrying it forever.
-			log.Printf("skipping malformed message at offset %d: %v", message.Offset, err)
+			log.Printf("skipping bad message at offset %d: %v", message.Offset, err)
 			continue
 		}
 

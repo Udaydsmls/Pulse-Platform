@@ -15,9 +15,9 @@ const (
 
 // OrderItem is one line in an order.
 type OrderItem struct {
-	ProductID string  `json:"product_id"`
+	ProductID string  `json:"productId"`
 	Quantity  int32   `json:"quantity"`
-	UnitPrice float64 `json:"unit_price"`
+	UnitPrice float64 `json:"unitPrice"`
 }
 
 // Order is a customer order.
@@ -31,7 +31,7 @@ type Order struct {
 	CreatedAt time.Time
 }
 
-// NewOrder builds a pending order and works out the total.
+// NewOrder builds a pending order and adds up the total.
 func NewOrder(id, userID, email string, items []OrderItem) *Order {
 	order := &Order{
 		ID:        id,
@@ -70,7 +70,7 @@ func (o *Order) Validate() error {
 	return nil
 }
 
-// CanCancel reports whether the order is still in a cancellable state.
+// CanCancel reports whether the order can still be cancelled.
 func (o *Order) CanCancel() bool {
 	return o.Status == StatusPending || o.Status == StatusConfirmed
 }

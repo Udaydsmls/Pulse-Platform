@@ -10,26 +10,26 @@ import (
 
 const userEventsTopic = "user.events"
 
-// Event is the message shape every Pulse service uses on Kafka. This service
-// only announces new accounts, so it needs just these fields — the other
-// services' events carry more.
+// Event is the JSON message shape shared by all the services. This one only
+// publishes new accounts, so it needs just these fields.
 type Event struct {
-	Type      string    `json:"event_type"`
-	UserID    string    `json:"user_id,omitempty"`
+	Type      string    `json:"eventType"`
+	UserID    string    `json:"userId,omitempty"`
 	Email     string    `json:"email,omitempty"`
 	Timestamp time.Time `json:"timestamp"`
 }
 
-// Producer publishes user events.
+// Producer publishes user events to Kafka.
 type Producer struct {
 	writer *kafka.Writer
 }
 
 func NewProducer(brokers []string) *Producer {
 	return &Producer{writer: &kafka.Writer{
-		Addr:         kafka.TCP(brokers...),
-		Topic:        userEventsTopic,
-		Balancer:     &kafka.Hash{},
+		Addr:     kafka.TCP(brokers...),
+		Topic:    userEventsTopic,
+		Balancer: &kafka.Hash{},
+		// Wait for the brokers to confirm the write before returning.
 		RequiredAcks: kafka.RequireAll,
 	}}
 }
@@ -37,22 +37,17 @@ func NewProducer(brokers []string) *Producer {
 // PublishUserCreated announces a new account so notification-service can send
 // the welcome email.
 func (p *Producer) PublishUserCreated(ctx context.Context, userID, email string) error {
-	event := Event{
+	value, err := json.Marshal(Event{
 		Type:      "user.created",
 		UserID:    userID,
 		Email:     email,
 		Timestamp: time.Now().UTC(),
-	}
-
-	value, err := json.Marshal(event)
+	})
 	if err != nil {
 		return err
 	}
 
-	return p.writer.WriteMessages(ctx, kafka.Message{
-		Key:   []byte(userID),
-		Value: value,
-	})
+	return p.writer.WriteMessages(ctx, kafka.Message{Key: []byte(userID), Value: value})
 }
 
 func (p *Producer) Close() error {

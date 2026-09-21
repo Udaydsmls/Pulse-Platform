@@ -64,8 +64,8 @@ func TestOrderValidate(t *testing.T) {
 	}
 }
 
-// A cancelled order must not be cancellable again, or the saga would publish a
-// second order.cancelled and release stock twice.
+// A cancelled order must not be cancelled again, or the stock would be
+// released twice.
 func TestCanCancel(t *testing.T) {
 	tests := map[string]bool{
 		StatusPending:   true,

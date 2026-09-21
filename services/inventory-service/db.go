@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB holds the Postgres queries for stock and reservations.
+// DB runs the SQL queries for stock and reservations.
 type DB struct {
 	pool *pgxpool.Pool
 }
@@ -48,15 +48,15 @@ func (db *DB) FindStock(ctx context.Context, productID string) (*StockItem, erro
 	return item, nil
 }
 
-// ReserveOrder reserves every item in an order, all or nothing. It runs in one
-// transaction and takes a row lock per product (SELECT ... FOR UPDATE), so two
-// orders competing for the last unit can't both win.
+// ReserveOrder reserves every item in an order, all or nothing. It runs in a
+// single transaction and locks each product row (SELECT ... FOR UPDATE) so two
+// orders cannot both take the last unit.
 func (db *DB) ReserveOrder(ctx context.Context, orderID string, items []OrderItem) error {
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	// Rolls back unless the Commit below already succeeded.
+	// No-op if the Commit at the end succeeded.
 	defer tx.Rollback(ctx)
 
 	for _, item := range items {
@@ -117,8 +117,8 @@ func (db *DB) ReleaseOrder(ctx context.Context, orderID string) error {
 		return err
 	}
 
-	// Collect first: the rows must be closed before the connection can run the
-	// UPDATE statements below.
+	// Read all the rows first; the connection can't run the updates below
+	// while a query is still open on it.
 	released := map[string]int32{}
 	for rows.Next() {
 		var productID string

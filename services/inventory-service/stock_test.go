@@ -2,8 +2,7 @@ package main
 
 import "testing"
 
-// Available is what the reservation check reads, so it must exclude stock that
-// is already promised to other pending orders.
+// Available has to exclude stock already promised to other pending orders.
 func TestAvailableExcludesReservedStock(t *testing.T) {
 	tests := []struct {
 		name       string

@@ -3,52 +3,30 @@ package main
 import (
 	"context"
 	"log"
-	"net"
-	"os"
-	"os/signal"
+	"net/http"
 	"strings"
-	"syscall"
 
-	grpcprom "github.com/grpc-ecosystem/go-grpc-prometheus"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
-	"google.golang.org/grpc"
-
-	"github.com/pulse-platform/inventory-service/gen/pb"
 )
 
 // Config holds everything this service reads from the environment.
 type Config struct {
-	GRPCPort     string
-	MetricsPort  string
+	Port         string
 	DatabaseURL  string
 	KafkaBrokers []string
-	OTelEndpoint string
 }
 
 func loadConfig() Config {
 	return Config{
-		GRPCPort:     envOr("GRPC_PORT", "50053"),
-		MetricsPort:  envOr("METRICS_PORT", "9090"),
+		Port:         envOr("PORT", "8083"),
 		DatabaseURL:  mustEnv("DATABASE_URL"),
 		KafkaBrokers: strings.Split(envOr("KAFKA_BROKERS", "localhost:9092"), ","),
-		OTelEndpoint: os.Getenv("OTEL_ENDPOINT"),
 	}
 }
 
 func main() {
 	cfg := loadConfig()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	if cfg.OTelEndpoint != "" {
-		shutdown, err := initTracing(ctx, "inventory-service", cfg.OTelEndpoint)
-		if err != nil {
-			log.Printf("tracing disabled: %v", err)
-		} else {
-			defer shutdown()
-		}
-	}
+	ctx := context.Background()
 
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -71,33 +49,18 @@ func main() {
 
 	go consumer.Run(ctx)
 
-	grpcServer := grpc.NewServer(
-		grpc.ChainUnaryInterceptor(
-			grpcprom.UnaryServerInterceptor,
-			otelgrpc.UnaryServerInterceptor(),
-		),
-	)
-	pb.RegisterInventoryServiceServer(grpcServer, &InventoryServer{db: db})
-	grpcprom.Register(grpcServer)
+	server := &Server{db: db}
 
-	go serveMetrics(cfg.MetricsPort)
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", handleHealth)
+	mux.HandleFunc("GET /stock/{productId}", server.CheckStock)
 
-	lis, err := net.Listen("tcp", ":"+cfg.GRPCPort)
-	if err != nil {
-		log.Fatalf("listen on %s: %v", cfg.GRPCPort, err)
+	log.Printf("inventory-service listening on :%s", cfg.Port)
+	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
+		log.Fatalf("http server: %v", err)
 	}
+}
 
-	go func() {
-		log.Printf("inventory-service listening on :%s", cfg.GRPCPort)
-		if err := grpcServer.Serve(lis); err != nil {
-			log.Printf("grpc server stopped: %v", err)
-		}
-	}()
-
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
-
-	log.Println("shutting down")
-	grpcServer.GracefulStop()
+func handleHealth(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }

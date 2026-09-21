@@ -1,34 +1,41 @@
 package main
 
 import (
-	"context"
-
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
-
-	"github.com/pulse-platform/inventory-service/gen/pb"
+	"net/http"
+	"strconv"
 )
 
-// InventoryServer implements the InventoryService gRPC API. Reservations happen
-// over Kafka in the saga; this is only the synchronous stock lookup.
-type InventoryServer struct {
-	pb.UnimplementedInventoryServiceServer
+// Server holds the dependencies the HTTP handlers need. Reservations happen
+// over Kafka as part of the saga; this is only the stock lookup.
+type Server struct {
 	db *DB
 }
 
+type stockResponse struct {
+	Available  bool  `json:"available"`
+	StockLevel int32 `json:"stockLevel"`
+}
+
 // CheckStock reports whether a product has enough units available.
-func (s *InventoryServer) CheckStock(ctx context.Context, req *pb.CheckStockRequest) (*pb.CheckStockResponse, error) {
-	if req.GetProductId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "product_id is required")
+func (s *Server) CheckStock(w http.ResponseWriter, r *http.Request) {
+	quantity := int32(1)
+	if raw := r.URL.Query().Get("quantity"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			writeError(w, http.StatusBadRequest, "quantity must be a positive number")
+			return
+		}
+		quantity = int32(parsed)
 	}
 
-	item, err := s.db.FindStock(ctx, req.GetProductId())
+	item, err := s.db.FindStock(r.Context(), r.PathValue("productId"))
 	if err != nil {
-		return nil, status.Error(codes.NotFound, "product not found")
+		writeError(w, http.StatusNotFound, "product not found")
+		return
 	}
 
-	return &pb.CheckStockResponse{
-		Available:  item.Available() >= req.GetQuantity(),
+	writeJSON(w, http.StatusOK, stockResponse{
+		Available:  item.Available() >= quantity,
 		StockLevel: item.Available(),
-	}, nil
+	})
 }

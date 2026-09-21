@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB holds the Postgres queries for orders.
+// DB runs the SQL queries for orders.
 type DB struct {
 	pool *pgxpool.Pool
 }

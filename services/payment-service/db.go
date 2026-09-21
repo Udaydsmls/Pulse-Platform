@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB holds the Postgres queries for payments.
+// DB runs the SQL queries for payments.
 type DB struct {
 	pool *pgxpool.Pool
 }

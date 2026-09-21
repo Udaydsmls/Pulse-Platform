@@ -17,7 +17,7 @@ func TestMockGatewayApprovesNormalAmounts(t *testing.T) {
 	}
 }
 
-// The saga's rollback path depends on this decline, so it has to actually fail.
+// The rollback path depends on this decline actually failing.
 func TestMockGatewayDeclinesOverLimit(t *testing.T) {
 	gateway := NewMockGateway(5000)
 

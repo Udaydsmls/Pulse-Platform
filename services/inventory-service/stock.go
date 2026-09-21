@@ -2,8 +2,8 @@ package main
 
 import "time"
 
-// StockItem is the stock we hold for one product. StockLevel is the physical
-// count; Reserved is how much of it is already promised to pending orders.
+// StockItem is the stock held for one product. StockLevel is how many units
+// exist; Reserved is how many are already promised to pending orders.
 type StockItem struct {
 	ProductID  string
 	StockLevel int32
@@ -18,7 +18,7 @@ func (s *StockItem) Available() int32 {
 
 // OrderItem is one line of an order, as it arrives on order.created.
 type OrderItem struct {
-	ProductID string  `json:"product_id"`
+	ProductID string  `json:"productId"`
 	Quantity  int32   `json:"quantity"`
-	UnitPrice float64 `json:"unit_price"`
+	UnitPrice float64 `json:"unitPrice"`
 }

@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// DB holds the Postgres queries for users.
+// DB runs the SQL queries for users.
 type DB struct {
 	pool *pgxpool.Pool
 }
@@ -40,8 +40,7 @@ func (db *DB) FindByID(ctx context.Context, id string) (*User, error) {
 	return db.findOne(ctx, `WHERE id = $1`, id)
 }
 
-// findOne runs a single-row lookup. The two finders differ only in their WHERE
-// clause, so they share this helper.
+// findOne runs a single-row lookup shared by the two finders above.
 func (db *DB) findOne(ctx context.Context, where string, args ...any) (*User, error) {
 	query := `SELECT id, email, name, password_hash, created_at FROM users ` + where
 
