@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: pulse-config
+  namespace: pulse
+data:
+  KAFKA_BROKERS: kafka:9092
+  USER_SERVICE_URL: http://user-service:8081
+  ORDER_SERVICE_URL: http://order-service:8082
+  INVENTORY_SERVICE_URL: http://inventory-service:8083
+---
+# Fine for a local cluster. A real deployment would use a sealed secret or an
+# external secret store instead of checking these in.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: pulse-secrets
+  namespace: pulse
+stringData:
+  DATABASE_URL: postgresql://pulse:pulse@postgres:5432/pulsedb
+  JWT_SECRET: dev-secret-change-me
