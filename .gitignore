@@ -1,65 +1,21 @@
-# ─── Go ───────────────────────────────────────────────────────────────────────
+# Go
 bin/
-vendor/
 *.exe
-*.exe~
-*.dll
-*.so
-*.dylib
 coverage.out
-coverage.html
 *.test
-*.prof
 
-# ─── Node / TypeScript ────────────────────────────────────────────────────────
+# Node / TypeScript
 node_modules/
 dist/
-.env
-*.env.local
 npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-.pnp
-.pnp.js
 
-# ─── Terraform ───────────────────────────────────────────────────────────────
-.terraform/
-*.tfstate
-*.tfstate.backup
-*.tfstate.*.backup
-.terraform.lock.hcl
-terraform.tfvars
-override.tf
-override.tf.json
-*_override.tf
-*_override.tf.json
+# Environment
+.env
+.env.local
 
-# ─── AWS CDK ─────────────────────────────────────────────────────────────────
-cdk.out/
-cdk.context.json
-
-# ─── General ─────────────────────────────────────────────────────────────────
-*.log
-.DS_Store
+# Editors and OS
 .idea/
 .vscode/
-*.swp
-*.swo
-*~
+.DS_Store
 Thumbs.db
-
-# ─── Docker local overrides ───────────────────────────────────────────────────
-.env.local
-docker-compose.override.yml
-
-# ─── k6 load test results ─────────────────────────────────────────────────────
-load_tests/results/
-
-# ─── Helm chart archives ──────────────────────────────────────────────────────
-charts/*.tgz
-
-# ─── Generated protobuf code ──────────────────────────────────────────────────
-# Produced by `make proto` from the .proto files in proto/, which are the real
-# source of truth. Not committed, so a stale checked-in copy can't drift from
-# the contract.
-services/*/gen/
+*.swp
